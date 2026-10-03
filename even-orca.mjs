@@ -869,6 +869,31 @@ function main() {
         return send(res, 200, { ok: true });
       }
 
+      const lastM = p.match(/^\/sessions\/([^/]+)\/last$/);
+      if (lastM) {
+        // Where a conversation is at — used by the PMO.
+        const s = await hub.get(lastM[1]);
+        if (!s) return send(res, 404, { error: "Session not found" });
+        const a = await hub.agentFor(s.row);
+        let state = a ? (STATE_MAP[a.state] ?? "idle") : null;
+        if (!state) {
+          const pr = await hub.orca.probe(s.handle).catch(() => "idle");
+          state = pr === "busy" ? "busy" : pr.startsWith("blocked:") ? "awaiting" : "idle";
+        }
+        let pending = null;
+        let text = a?.lastAssistantMessage ?? "";
+        if (state === "awaiting" || !text) {
+          const lines = await hub.orca.screen(s.handle).catch(() => []);
+          if (state === "awaiting") {
+            const menu = extractMenu(lines);
+            pending = { kind: a?.state === "waiting" ? "question" : "approval", description: menu?.question ?? "Approval needed", detail: menu?.detail ?? "", options: (menu?.options ?? []).map((o) => `${o.key}. ${o.text}`) };
+          }
+          if (!text) text = extractAnswer(lines, a?.prompt ?? "");
+        }
+        const stamp = a ? `${a.state}|${a.stateStartedAt ?? ""}|${a.updatedAt ?? ""}` : `${state}|${s.row.lastOutputAt ?? ""}`;
+        return send(res, 200, { state, stamp, text: String(text).slice(-6000), prompt: a?.prompt ?? "", pending, title: hub.titleOf(s.row) });
+      }
+
       const hist = p.match(/^\/sessions\/([^/]+)\/history$/);
       if (hist) {
         const s = await hub.get(hist[1]);

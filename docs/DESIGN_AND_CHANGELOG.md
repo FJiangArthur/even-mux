@@ -1,7 +1,7 @@
 # even-mux / even-orca：来龙去脉、架构与全部改动记录
 
 > 适用版本：even-mux 0.1.0 · even-orca 0.1.0 · 上游 `@evenrealities/even-terminal` 0.10.4–0.10.5 · Orca 1.4.212
-> 最后更新：2026-09-28
+> 最后更新：2026-10-03（新增 even-codex：Codex UI 接入；even-pmo：总 PMO 替你回复）
 > 读者：想在自己机器上复用这套方案、或者要维护它的人
 
 ---
@@ -16,6 +16,8 @@
 |---|---|---|
 | **even-mux** | 多路复用代理。对 Even App 伪装成“一个 even-terminal 服务器”，背后把请求路由到多个后端；带会话可见性控制（Web UI + CLI） | 3456（Tailscale IP + 127.0.0.1） |
 | **even-orca** | 适配器。把 Orca CLI（`orca terminal …` / `orca worktree ps`）翻译成 even-terminal 的 HTTP/SSE 协议，让 Orca 里的 agent 终端出现在眼镜上 | 3458（仅 127.0.0.1） |
+| **even-codex** | 把 Codex 的 thread（ChatGPT.app 里的 Codex UI、Codex CLI）接到眼镜上：自己起一个 `codex app-server`，读写同一份 `~/.codex` | 3459（仅 127.0.0.1） |
+| **even-pmo** | 总 PMO：持续监听所有 Orca + Codex 会话，低风险的替你回复，其余交给你；本身也是眼镜上置顶的一个会话，另有 Web 面板 | 3460（仅 127.0.0.1） |
 | even-terminal（上游，未修改） | 官方本机服务器，管理本机 Claude/Codex 会话 | 3457（Tailscale IP + 127.0.0.1） |
 
 ---
@@ -95,6 +97,21 @@
 
 ---
 
+### 3.3 even-codex（`even-codex.mjs`）
+- Codex UI（ChatGPT.app）自己起一个私有的 `codex app-server --listen stdio://`，外部接不进它的实时通道；但所有 app-server 共用 `~/.codex` 存储。even-codex 也起一个自己的 app-server，用 `thread/list`（`sourceKinds: cli, vscode, appServer`）列出全部 thread，按 `originator` 标注：`Codex Desktop` → `[Codex UI]`，`codex-tui` → `[Codex CLI]`。
+- 默认隐藏噪音：`Reply READY` / readiness probe，以及 Orca 起的 Codex 终端（已由 even-orca 显示）。
+- 回复：`thread/resume` + `turn/start`；事件（`turn/started`、`item/agentMessage/delta`、`item/started|completed`、`turn/completed`）转成眼镜事件；本进程跑的回合里的审批（`item/commandExecution/requestApproval` 等）和提问（`item/tool/requestUserInput`）可以在眼镜上处理。
+- **限制**：从外部写进去的消息，Codex UI 要重新打开该 thread 才看得到；如果 Codex UI 正在这个 thread 上跑（最后一回合 `inProgress`），even-codex 拒绝写入（409）；Codex UI 自己弹出的审批无法从外部处理。
+
+### 3.4 even-pmo（`even-pmo.mjs`）
+- **监听**：每 8 秒取 even-mux 的 `/mux/sessions`，只看 `watchBackends`（默认 `orca`、`codex`）。会话状态/时间有变化才调用 `GET /api/sessions/:id/last`（even-orca、even-codex 新增的统一接口：`state / stamp / text / prompt / pending`）。启动时只记基线，不处理启动前的历史（面板上可手动“处理已在等待的会话”）。
+- **判断**：调用本机 `claude -p`（去掉 `ANTHROPIC_API_KEY` 走 claude.ai 登录——带着 API key 时会卡住；`--strict-mcp-config --tools "" --system-prompt …`，每次约 $0.03、约 10 秒）。返回 `reply / escalate / none`。
+- **代码级硬规则**（不只靠提示词）：审批菜单永远交给你；回复或问题命中 `escalatePatterns`（deploy/prod/migrate/delete/rm -rf/force/git push/merge/付款/发送/发布/密钥/上线/部署/生产/删除/迁移…）→ 交给你；置信度 < 0.6 → 交给你；限流（每会话每小时 4 次、全局每小时 30 次、同一会话最少间隔 90 秒）；连续 3 次自动回复而你没说话 → 交给你；同一句话连发两次 → 判为循环、交给你；有人（你）在别处跟这个 agent 说过话 → 连续计数清零。
+- **模式**：`off` / `shadow`（只记录“本来会怎么做”，首次运行默认）/ `draft`（全部做成草稿等你点发送）/ `auto`（低风险直接发）。
+- **在眼镜上**：`★ PMO · N 件待你处理 · 模式` 置顶会话。待办以选项菜单出现（发送建议回复 / 跳过；审批类显示原审批选项）。直接对它说话＝问状态或下指令（“让 GCP 那个先停下”→ 它找到对应会话并发送）；以 `回复：` 开头＝用你的话回复最上面那条待办。
+- **Web 面板**：`http://127.0.0.1:3460/ui`（仅本机）——模式切换、待办队列（可改草稿再发、可点审批选项）、决策日志（每条带理由）、按会话静音、和 PMO 对话。可见性页面 `/mux/ui` 右上角有入口。
+- 状态文件：`~/.even-pmo/state.json`（模式、已处理签名、日志、待办、限流计数）；配置：`~/.even-pmo/config.json`（`owner`、`instructions` 可写你的长期偏好）。
+
 ## 4. 部署现状（本机）
 
 | 项 | 值 |
@@ -106,6 +123,8 @@
 | even-orca | `~/.even-orca/config.json`：port 3458，host 127.0.0.1，`orcaCommand=/Applications/Orca.app/Contents/Resources/bin/orca` |
 | even-mux | `~/.even-mux/config.json`：port 3456，host = 本机 Tailscale IP，后端 `orca`（默认）+ `local` |
 | 可见性 | `~/.even-mux/visibility.json` |
+| even-codex | `~/.even-codex/config.json`：port 3459，127.0.0.1 |
+| even-pmo | `~/.even-pmo/config.json`：port 3460，127.0.0.1；状态 `~/.even-pmo/state.json` |
 | 配对信息 | `~/.even-mux/pair.txt`（URL、token、二维码；权限 600） |
 
 启动 / 重启：
@@ -114,6 +133,8 @@
 L=~/.even-mux/logs; mkdir -p $L
 tmux new-session -d -s even -n terminal "zsh -lc 'even-terminal 2>&1 | tee $L/even-terminal.log'"
 tmux new-window  -t even -n orca     "zsh -lc 'even-orca 2>&1 | tee $L/even-orca.log'"
+tmux new-window  -t even -n codex    "zsh -lc 'even-codex 2>&1 | tee $L/even-codex.log'"
+tmux new-window  -t even -n pmo      "zsh -lc 'even-pmo 2>&1 | tee $L/even-pmo.log'"
 tmux new-window  -t even -n mux      "zsh -lc 'even-mux 2>&1 | tee $L/even-mux.log'"
 # 只重启某一个：
 tmux respawn-window -k -t even:mux "zsh -lc 'even-mux 2>&1 | tee $HOME/.even-mux/logs/even-mux.log'"
@@ -272,6 +293,18 @@ even-mux host local off|on        # 整个主机开关
 - 选择器对只按 provider 返回的后端（even-terminal）分别查询 claude 和 codex 并去重——否则本机只显示默认 provider（codex）的 2 条，无法隐藏 Claude 会话。
 - UI 修正：开关用 `<label>` 包裹 checkbox，点击才生效；用 headless Chromium 验证桌面浅色 / 手机深色两种布局无横向滚动。
 
+### 阶段 K — Codex UI 接入（2026-10-03）
+- 调研：Codex UI 在 ChatGPT.app 内，起私有 stdio app-server；另有 `codex app-server daemon` 的 control socket，但不是逐行 JSON-RPC（直连无响应），且 Codex UI 并不用它。改为自己起 `codex app-server --listen stdio://`。
+- 发现 even-terminal 自带的 Codex provider 只返回 10 条且用默认来源过滤，看不到 Codex UI 的 thread → 新写 even-codex，而不是改上游。
+- 用 `codex app-server generate-json-schema` 核对协议（`thread/list`、`thread/turns/list`、`turn/start`、审批 `{decision: accept|acceptForSession|decline}`、`ThreadActiveFlag: waitingOnApproval|waitingOnUserInput`）。
+
+### 阶段 L — 总 PMO（2026-10-03）
+- even-orca、even-codex 新增 `/api/sessions/:id/last`。
+- even-pmo：监听、Claude 判断、硬规则、限流、模式、眼镜置顶会话、Web 面板。
+- `claude -p` 在设置了 `ANTHROPIC_API_KEY` 的 shell 里会卡住 → PMO 调用时去掉该变量；精简参数后单次约 $0.03。
+- 测试中发现“自动回复 → agent 回声 → 再自动回复”的循环 → 加入“同一句话不连发”“连续 3 次转给你”“你说过话就清零”三道保护。
+- 新增测试模拟器：`test/mock-codex.mjs`（app-server）、`test/mock-claude.mjs`（PMO 的 claude -p）。
+
 ---
 
 ## 9. 测试
@@ -304,6 +337,8 @@ node test/mock-backend.mjs 4001 t1 LOCAL   # 模拟一个 even-terminal 后端
 - 端口被占用时进程直接抛 `EADDRINUSE` 退出，提示不友好。
 - Pi 会话在 App 里标为 `claude` provider（App 只认 claude/codex）。
 - 没有开机自启（LaunchAgent）；Mac 重启后需要重新执行第 4 节的 tmux 命令。
+- PMO 首次在真实会话上运行时为观察模式；切到自动前先在面板里看它的判断。
+- Codex UI 里回复要重开 thread 才显示；Codex UI 自己弹出的审批无法从外部处理。
 - 置顶/隐藏按 session ID 记录；Orca 里关闭再重建的终端会得到新 ID。
 
 ---
@@ -314,6 +349,10 @@ node test/mock-backend.mjs 4001 t1 LOCAL   # 模拟一个 even-terminal 后端
 | `even-mux.mjs` | 多路代理 + 可见性 + CLI |
 | `even-orca.mjs` | Orca CLI 适配器 |
 | `ui.html` | 可见性 Web UI（由 even-mux 在 `/mux/ui` 提供） |
+| `even-codex.mjs` | Codex thread 适配器（Codex UI / CLI） |
+| `even-pmo.mjs` | 总 PMO |
+| `pmo-ui.html` | PMO 面板（由 even-pmo 在 `/ui` 提供） |
+| `test/mock-codex.mjs` / `test/mock-claude.mjs` | Codex app-server 与 claude -p 的模拟 |
 | `package.json` | bin：`even-mux`、`even-orca`；依赖 `qrcode-terminal` |
 | `test/parse.test.mjs` | 读屏解析单测 |
 | `test/mock-orca.mjs` | 有状态的 Orca CLI 模拟 |

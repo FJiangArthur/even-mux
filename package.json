@@ -1,11 +1,13 @@
 {
   "name": "even-mux",
   "version": "0.1.0",
-  "description": "Drive Orca agent terminals and multiple even-terminal servers from Even Realities glasses",
+  "description": "Drive Orca and Codex agent sessions from Even Realities glasses, with a PMO that answers for you",
   "type": "module",
   "bin": {
     "even-mux": "even-mux.mjs",
-    "even-orca": "even-orca.mjs"
+    "even-orca": "even-orca.mjs",
+    "even-codex": "even-codex.mjs",
+    "even-pmo": "even-pmo.mjs"
   },
   "engines": {
     "node": ">=18"

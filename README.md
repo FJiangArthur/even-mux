@@ -30,6 +30,10 @@ even-mux sessions                   # same from the terminal; then hide|show|pin
 even-mux host <name> on|off         # whole host on/off
 ```
 
+Also in this repo: **even-codex** (Codex UI / Codex CLI threads on the glasses) and **even-pmo** (a PMO that watches every
+Orca + Codex conversation, answers low-risk ones for you and escalates the rest; panel at `http://127.0.0.1:3460/ui`).
+See the doc above, sections 3.3–3.4.
+
 ---
 
 # even-orca

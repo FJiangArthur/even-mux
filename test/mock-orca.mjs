@@ -59,12 +59,12 @@ const flag = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i +
 const has = (n) => argv.includes(`--${n}`);
 const find = () => st.terminals.find((t) => t.handle === flag("terminal"));
 const [a, b] = argv;
-const pub = (t) => { const { phase, lines, until, reply, approvalAt, blockedAt, doneAt, startedAt, lastMsg, ...rest } = t; return rest; };
+const pub = (t) => { const { phase, lines, until, reply, approvalAt, blockedAt, doneAt, startedAt, lastMsg, lastPrompt, ...rest } = t; return rest; };
 function agentOf(t) {
   if (!t.agentIdentity) return null;
   const state = t.phase === "approval" ? "blocked" : t.phase === "idle" ? "done" : "working";
   const at = state === "blocked" ? t.blockedAt : state === "done" ? (t.doneAt ?? 1000) : (t.startedAt ?? 1000);
-  return { paneKey: `${t.tabId}:${t.leafId}`, state, agentType: t.agentIdentity, prompt: "", taskTitle: null, displayName: null,
+  return { paneKey: `${t.tabId}:${t.leafId}`, state, agentType: t.agentIdentity, prompt: t.lastPrompt ?? "", taskTitle: null, displayName: null,
     lastAssistantMessage: t.lastMsg ?? "earlier answer", toolName: state === "working" ? "Bash" : state === "blocked" ? "Bash" : "Read",
     toolInput: state === "blocked" ? "rm -rf build" : state === "working" ? "npm test" : "README.md", stateStartedAt: at, updatedAt: at, interrupted: false };
 }
@@ -103,7 +103,7 @@ else if (a === "terminal" && b === "send") {
       else if (text === "\u001b" || text === "3") { t.phase = "idle"; t.lines.push("  ⎿  Interrupted by user"); }
     } else if (text === "\u001b") { if (t.phase === "busy") { t.phase = "idle"; t.lines.push("  ⎿  Interrupted"); } }
     else if (has("enter")) {
-      t.lines.push(`> ${text}`); t.phase = "busy"; t.startedAt = now; t.until = now + 2500; t.reply = `Answer to: ${text}`;
+      t.lines.push(`> ${text}`); t.lastPrompt = text; t.phase = "busy"; t.startedAt = now; t.until = now + 2500; t.reply = `Answer to: ${text}`;
       if (/\brm\b|clean/.test(text)) t.approvalAt = now + 800;
     }
     t.lastOutputAt = now;
