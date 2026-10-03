@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>even-mux sessions</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --line: #e3e6eb; --text: #1b1f24; --muted: #6a737d;
+    --accent: #2f6fed; --accent-soft: #e8f0fe; --ok: #1f9d55; --warn: #c27c0e; --off: #9aa3ad;
+    --pin: #d9a400; --shadow: 0 1px 2px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --line: #262c34; --text: #e6e9ee; --muted: #8b949e;
+      --accent: #6ea0ff; --accent-soft: #1b2a45; --ok: #3fb96f; --warn: #e0a13a; --off: #5b636d;
+      --pin: #f2c230; --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 650; }
+  .sub { color: var(--muted); }
+  .spacer { flex: 1; }
+  button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: var(--shadow); margin-bottom: 16px; }
+  section > h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+    margin: 0; padding: 12px 16px 8px; font-weight: 600; }
+  .hosts { display: flex; gap: 12px; flex-wrap: wrap; padding: 4px 16px 16px; }
+  .host { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--off); flex: none; }
+  .dot.up, .dot.busy { background: var(--ok); } .dot.awaiting { background: var(--warn); }
+  .preview { margin: 0; padding: 0 16px 14px 40px; color: var(--muted); }
+  .preview li { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .preview li b { color: var(--text); font-weight: 500; }
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  input[type=search] { flex: 1 1 220px; min-width: 0; font: inherit; color: inherit; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 6px 10px; background: transparent; }
+  .seg button.on { background: var(--accent-soft); color: var(--accent); }
+  .row { display: grid; grid-template-columns: auto auto 1fr auto; gap: 12px; align-items: center;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .row.dim .title { color: var(--muted); }
+  .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  .meta { color: var(--muted); font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
+  .meta .cwd { max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .badge.forced { border-color: var(--accent); color: var(--accent); }
+  .pin { border: 0; background: transparent; padding: 2px 4px; font-size: 16px; color: var(--off); }
+  .pin.on { color: var(--pin); }
+  .reset { font-size: 12px; padding: 3px 8px; }
+  .switch { position: relative; width: 34px; height: 20px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .switch span { position: absolute; inset: 0; background: var(--line); border-radius: 999px; transition: .15s; cursor: pointer; }
+  .switch span::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px;
+    background: #fff; border-radius: 50%; transition: .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::before { transform: translateX(14px); }
+  .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .empty, .err { padding: 24px 16px; color: var(--muted); text-align: center; }
+  .err { color: var(--warn); }
+  @media (max-width: 600px) {
+    .row { grid-template-columns: auto 1fr auto; }
+    .row .pin { grid-row: 1; grid-column: 3; }
+    .row .actions { grid-column: 2 / 4; }
+    .meta .cwd { display: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Sessions on glasses</h1>
+    <span class="sub" id="counts"></span>
+    <span class="spacer"></span>
+    <span class="sub" id="updated"></span>
+    <button id="refresh">Refresh</button>
+  </header>
+
+  <section>
+    <h2>Hosts</h2>
+    <div class="hosts" id="hosts"></div>
+  </section>
+
+  <section>
+    <h2>What the glasses list shows now</h2>
+    <ol class="preview" id="preview"></ol>
+  </section>
+
+  <section>
+    <div class="toolbar">
+      <input type="search" id="q" placeholder="Filter by title, host, folder…" aria-label="Filter sessions">
+      <div class="seg" role="group" aria-label="Show">
+        <button data-f="all" class="on">All</button>
+        <button data-f="visible">Visible</button>
+        <button data-f="hidden">Hidden</button>
+      </div>
+      <button id="hideAll" title="Hide every session in the current filter">Hide listed</button>
+      <button id="showAll" title="Show every session in the current filter">Show listed</button>
+    </div>
+    <div id="list"><div class="empty">Loading…</div></div>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let data = null, filter = "all", busy = false;
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function ago(ts) {
+  const d = (Date.now() - new Date(ts).getTime()) / 1000;
+  if (!isFinite(d)) return "";
+  if (d < 60) return "now";
+  if (d < 3600) return Math.floor(d / 60) + "m";
+  if (d < 86400) return Math.floor(d / 3600) + "h";
+  return Math.floor(d / 86400) + "d";
+}
+const WHY = { auto: "", pinned: "pinned", shown: "shown by you", hidden: "hidden by you",
+  rule: "hidden by rule", "over max": "over host limit", "host off": "host off" };
+
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+async function load() {
+  if (busy) return;
+  busy = true; $("#refresh").disabled = true;
+  try {
+    data = await api("/mux/sessions");
+    render();
+    $("#updated").textContent = "updated " + new Date().toLocaleTimeString();
+  } catch (e) {
+    $("#list").innerHTML = `<div class="err">Couldn't load sessions: ${esc(e.message)}</div>`;
+  } finally { busy = false; $("#refresh").disabled = false; }
+}
+
+function visibleRows() {
+  const q = $("#q").value.trim().toLowerCase();
+  return data.sessions.filter((s) => {
+    if (filter === "visible" && !s.visible) return false;
+    if (filter === "hidden" && s.visible) return false;
+    if (!q) return true;
+    return [s.title, s.backend, s.tag, s.cwd, s.provider].join(" ").toLowerCase().includes(q);
+  });
+}
+
+function render() {
+  const vis = data.sessions.filter((s) => s.visible).length;
+  $("#counts").textContent = `${vis} shown · ${data.sessions.length - vis} hidden`;
+
+  $("#hosts").innerHTML = data.backends.map((b) => `
+    <div class="host">
+      <span class="dot ${b.up ? "up" : ""}" title="${b.up ? "up" : "down"}"></span>
+      <span><b>${esc(b.name)}</b> <span class="sub">${b.tag ? "[" + esc(b.tag) + "]" : ""}${b.max != null ? " · max " + b.max : ""}</span></span>
+      <label class="switch"><input type="checkbox" data-host="${esc(b.name)}" ${b.enabled ? "checked" : ""} aria-label="Show ${esc(b.name)} sessions"><span></span></label>
+    </div>`).join("");
+
+  const byId = new Map(data.sessions.map((s) => [s.id, s]));
+  $("#preview").innerHTML = (data.preview || []).map((id) => {
+    const s = byId.get(id);
+    return s ? `<li><b>${esc(s.display)}</b></li>` : "";
+  }).join("") || `<li>Nothing — every session is hidden.</li>`;
+
+  const rows = visibleRows();
+  $("#list").innerHTML = rows.length ? rows.map((s) => `
+    <div class="row ${s.visible ? "" : "dim"}">
+      <label class="switch"><input type="checkbox" data-id="${esc(s.id)}" ${s.visible ? "checked" : ""} aria-label="Show on glasses"><span></span></label>
+      <button class="pin ${s.pinned ? "on" : ""}" data-pin="${esc(s.id)}" title="${s.pinned ? "Unpin" : "Pin to top"}" aria-label="${s.pinned ? "Unpin" : "Pin to top"}">${s.pinned ? "★" : "☆"}</button>
+      <div style="min-width:0">
+        <div class="title" title="${esc(s.title)}">${esc(s.title) || "<i>untitled</i>"}</div>
+        <div class="meta">
+          <span><span class="dot ${esc(s.status)}"></span> ${esc(s.status || "idle")}</span>
+          <span>${esc(s.backend)}</span>
+          <span>${esc(s.provider || "")}</span>
+          <span>${ago(s.timestamp)}</span>
+          ${s.cwd ? `<span class="cwd" title="${esc(s.cwd)}">${esc(s.cwd)}</span>` : ""}
+        </div>
+      </div>
+      <div class="actions">
+        ${WHY[s.why] ? `<span class="badge ${s.forced ? "forced" : ""}">${WHY[s.why]}</span>` : ""}
+        ${s.forced ? `<button class="reset" data-auto="${esc(s.id)}" title="Back to automatic rules">Reset</button>` : ""}
+      </div>
+    </div>`).join("") : `<div class="empty">No sessions match.</div>`;
+}
+
+async function act(ids, action) {
+  try { await api("/mux/visibility", { ids, action }); } catch (e) { alert(e.message); }
+  busy = false; await load();
+}
+
+document.addEventListener("change", async (e) => {
+  const t = e.target;
+  if (t.dataset.id) act([t.dataset.id], t.checked ? "show" : "hide");
+  if (t.dataset.host) {
+    try { await api("/mux/backend", { name: t.dataset.host, enabled: t.checked }); } catch (err) { alert(err.message); }
+    load();
+  }
+});
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("button");
+  if (!t) return;
+  if (t.dataset.pin) { const s = data.sessions.find((x) => x.id === t.dataset.pin); act([t.dataset.pin], s?.pinned ? "unpin" : "pin"); }
+  if (t.dataset.auto) act([t.dataset.auto], "auto");
+  if (t.dataset.f) { filter = t.dataset.f; document.querySelectorAll(".seg button").forEach((b) => b.classList.toggle("on", b === t)); render(); }
+});
+$("#q").addEventListener("input", () => data && render());
+$("#refresh").addEventListener("click", load);
+$("#hideAll").addEventListener("click", () => { const ids = visibleRows().map((s) => s.id); if (ids.length && confirm(`Hide ${ids.length} sessions?`)) act(ids, "hide"); });
+$("#showAll").addEventListener("click", () => { const ids = visibleRows().map((s) => s.id); if (ids.length) act(ids, "show"); });
+load();
+setInterval(() => { if (!document.hidden) load(); }, 20000);
+</script>
+</body>
+</html>
